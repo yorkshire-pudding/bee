@@ -372,6 +372,11 @@ function download_core_bee_callback($arguments, $options) {
 
   $info = download_bee_get_project_info('backdrop', 'backdrop', $core_version['release'], $core_version['branch'], $github_api_token);
 
+  if (!$info) {
+    bee_message(bt("Download operation is cancelled."), 'info');
+    return;
+  }
+
   // Get or create the directory to download Backdrop into.
   $destination = !empty($arguments['directory']) ? $arguments['directory'] : getcwd();
   if (!realpath($destination)) {
@@ -538,10 +543,16 @@ function download_bee_get_project_info($project, $organization, $release = '', $
       $preferred_option = 'select';
 
       $selection = download_bee_select_version($project, $organization, $github_api_token);
-
+      if (empty($selection)) {
+        return FALSE;
+      }
       // Use the selection to set variables that will be used in the next step.
       if ($selection['value'] == 'dev') {
         $final_option = 'dev';
+      }
+      elseif ($selection['value'] == 'cancel') {
+        bee_message(bt("Download operation is cancelled."), 'info');
+        return FALSE;
       }
       else {
         $final_option = 'defined_release';
@@ -563,22 +574,38 @@ function download_bee_get_project_info($project, $organization, $release = '', $
         $release_data = download_bee_github_api_call($endpoint, $github_api_token);
       }
       else {
-        // If the release page does not exist offer to get the dev version
-        // instead.
-        $choice = bee_confirm(bt("The release you have specified (!release_tag) for '!organization/!project' does not exist. Do you want to select a version instead?", array(
-          '!release_tag' => $defined_release,
-          '!organization' => $organization,
-          '!project' => $project,
-        )), TRUE);
+        // If the release page does not exist offer to give them a choice of
+        // valid releases and the dev version instead.
+        if (is_numeric($defined_release[0])) {
+          $confirm_message = bt("The release you have specified (!release_tag) for '!organization/!project' does not exist. Do you want to select a version instead?", array(
+            '!release_tag' => $defined_release,
+            '!organization' => $organization,
+            '!project' => $project,
+          ));
+        }
+        else {
+          $confirm_message = bt("The version you specified (!release_tag) does not match a keyword or a release for '!organization/!project'. Do you want to select a version instead?", array(
+            '!release_tag' => $defined_release,
+            '!organization' => $organization,
+            '!project' => $project,
+          ));
+        }
+        $choice = bee_confirm($confirm_message, TRUE);
         if ($choice) {
           // If 'Yes' mode was enabled or user responded 'Yes', then continue
           // with selection.
           $selection = download_bee_select_version($project, $organization, $github_api_token);
-
+          if (empty($selection)) {
+            return FALSE;
+          }
           // Use the selection to set variables that will be used in the next
           // step.
           if ($selection['value'] == 'dev') {
             $final_option = 'dev';
+          }
+          elseif ($selection['value'] == 'cancel') {
+            bee_message(bt("Download operation is cancelled."), 'info');
+            return FALSE;
           }
           else {
             $final_option = 'defined_release';
@@ -599,7 +626,6 @@ function download_bee_get_project_info($project, $organization, $release = '', $
   // Process the final option.
   switch ($final_option) {
     case 'latest':
-      // $download_url = "https://github.com/$organization/$project/releases/latest/download/$project.zip";
       // Check GitHub API quota to ensure we can continue.
       if (!download_bee_check_github_api_quota($github_api_token)) {
         return FALSE;
@@ -607,6 +633,14 @@ function download_bee_get_project_info($project, $organization, $release = '', $
       // Get the latest release information.
       $endpoint = "$endpoint_base/releases/latest";
       $release_data = download_bee_github_api_call($endpoint, $github_api_token);
+      if (empty($release_data)) {
+        // If release data can't be retrieved, display an error and return
+        // FALSE.
+        bee_message(bt("Release data for !project' could not be retrieved. Please try again later.", array(
+          '!project' => $project,
+        )), 'error');
+        return FALSE;
+      }
       $defined_release = $release_data['tag_name'];
       bee_instant_message('$defined_release:' . $defined_release, 'debug');
       // $defined_release_published_date = $latest_release['published_at'];
@@ -693,6 +727,17 @@ function download_bee_get_project_info($project, $organization, $release = '', $
     bee_instant_message('$endpoint:' . $endpoint, 'debug');
     // // Retrieve the info file as an array of lines.
     $info_file = download_bee_github_api_call($endpoint, $github_api_token, 'raw');
+    bee_instant_message('$info_file:', 'debug', $info_file);
+    // If the .info file cannot be found, then it will return a string
+    // containing a JSON object whereas if it can be found, it will return a
+    // string and therefore `json_decode` will return 'null'.
+    if (!is_null(json_decode($info_file[0]))) {
+      // If info file can't be retrieved, display an error and return FALSE.
+      bee_message(bt("Error retrieving .info file for '!project'.", array(
+        '!project' => $project,
+      )), 'error');
+      return FALSE;
+    }
     $info_parsed = bee_parse_info_format($info_file[0]);
     bee_instant_message(bt('The info file data:'), 'debug', $info_parsed);
     $info['type'] = $info_parsed['type'];
@@ -721,7 +766,7 @@ function download_bee_select_version($project, $organization, $github_api_token 
     return FALSE;
   }
   // Get the list of releases.
-  $endpoint = "repos/$organization/$project/releases";
+  $endpoint = "repos/$organization/$project/releases?per_page=10";
   $releases = download_bee_github_api_call($endpoint, $github_api_token);
   // If one or more releases exist, then loop through them to get more
   // information.
@@ -765,12 +810,15 @@ function download_bee_select_version($project, $organization, $github_api_token 
     $message = bt("No releases exist but you can download the dev version.");
     $default = 'dev';
   }
+  $select_options['cancel'] = 'Cancel';
   // Present the choice to the user.
   $selection = bee_choice($select_options, $message, $default);
+  bee_instant_message('$selection: ' . $selection, 'debug');
   switch ($selection) {
     case 'dev':
+    case 'cancel':
       $result = array(
-        'value' => 'dev',
+        'value' => $selection,
       );
       break;
     default:
@@ -779,6 +827,7 @@ function download_bee_select_version($project, $organization, $github_api_token 
         'data' => $releases_by_tag[$selection],
       );
   }
+  bee_instant_message('$result: ', 'debug', $result);
   return $result;
 }
 
@@ -1192,8 +1241,8 @@ function download_bee_github_api_call($endpoint, $github_api_token = '', $reques
 /**
  * Check whether a URL exists.
  *
- * This helper function provides a simple check for URLs that does require any
- * use of the GitHub API call quota.
+ * This helper function provides a simple check for URLs that does not require
+ * any use of the GitHub API call quota.
  *
  * @param string $url
  *   The URL to check.
