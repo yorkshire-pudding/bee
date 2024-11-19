@@ -18,6 +18,7 @@ set_error_handler('bee_error_handler');
 // Include files.
 require_once __DIR__ . '/includes/miscellaneous.inc';
 require_once __DIR__ . '/includes/command.inc';
+require_once __DIR__ . '/includes/renderTable.inc';
 require_once __DIR__ . '/includes/render.inc';
 require_once __DIR__ . '/includes/filesystem.inc';
 require_once __DIR__ . '/includes/input.inc';

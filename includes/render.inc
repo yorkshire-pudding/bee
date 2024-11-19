@@ -251,6 +251,33 @@ function bee_format_text($text, $color = FALSE, $bold = FALSE) {
   }
 }
 
+
+function bee_render_table(array $variables, $newline = TRUE) {
+  $rows = array();
+  
+
+  $headers = array();
+  if (isset($variables['header'])) {
+    foreach ($variables['header'] as $header) {
+      $headers[] = $header['value'];
+    }
+  }
+
+  foreach ($variables['rows'] as $row) {
+    foreach ($row as $index => $column) {
+      $columns[$index] = $column['value'];
+    }
+    $rows[] = $columns;
+  }
+
+  $table_printer = new TableBuilder;
+  $rendered_table = $table_printer->getTableRows($rows, $headers);
+  $table_printer->echoTableRows($rendered_table);
+
+  if ($newline) {
+    echo "\n";
+  }
+}
 /**
  * Output a table of information.
  *
@@ -273,7 +300,7 @@ function bee_format_text($text, $color = FALSE, $bold = FALSE) {
  *   Whether or not to add a newline character (`\n`) to the end of the output.
  *   Defaults to TRUE.
  */
-function bee_render_table(array $variables, $newline = TRUE) {
+function old_bee_render_table(array $variables, $newline = TRUE) {
   // Get variables and set default values.
   $rows = $variables['rows'];
   $header = isset($variables['header']) ? $variables['header'] : array();
